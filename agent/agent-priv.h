@@ -164,6 +164,10 @@ struct _NiceAgent
   guint16 rfc4571_expecting_length;
   gboolean use_ice_udp;
   gboolean use_ice_tcp;
+  gboolean global_passive; /* if true, the same address for all host candidates */
+  gpointer passive_udp;
+  gpointer passive_tcp;
+
   /* XXX: add pointer to internal data struct for ABI-safe extensions */
 };
 

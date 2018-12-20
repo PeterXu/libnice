@@ -1037,6 +1037,9 @@ nice_agent_init (NiceAgent *agent)
   agent->reliable = FALSE;
   agent->use_ice_udp = TRUE;
   agent->use_ice_tcp = TRUE;
+  agent->global_passive = FALSE;
+  agent->passive_udp = NULL;
+  agent->passive_tcp = NULL;
 
   agent->rng = nice_rng_new ();
   priv_generate_tie_breaker (agent);
@@ -3489,6 +3492,7 @@ agent_recv_message_unlocked (
         message->length = ntohs (rfc4571_frame);
       }
     } else {
+      /*TODO: yzxu, tcp global passive */
       if (nicesock->type == NICE_SOCKET_TYPE_TCP_PASSIVE) {
         NiceSocket *new_socket;
 
@@ -3599,6 +3603,7 @@ agent_recv_message_unlocked (
       }
     }
   } else {
+    /*TODO: yzxu, check udp passive here*/
     retval = nice_socket_recv_messages (nicesock, message, 1);
   }
 
@@ -4853,6 +4858,7 @@ nice_agent_dispose (GObject *object)
 gboolean
 component_io_cb (GSocket *gsocket, GIOCondition condition, gpointer user_data)
 {
+  /*TODO: yzxu, main loop*/
   SocketSource *socket_source = user_data;
   NiceComponent *component;
   NiceAgent *agent;

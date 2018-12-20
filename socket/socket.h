@@ -93,6 +93,14 @@ struct _NiceSocket
   void *priv;
 };
 
+typedef struct _NicePassive NicePassive;
+
+struct _NicePassive {
+  NiceSocket *sock;
+  guint stream_id;
+  GIOStream *io_stream;
+  GThread *thread;
+};
 
 G_GNUC_WARN_UNUSED_RESULT
 gint

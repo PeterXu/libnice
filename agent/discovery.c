@@ -508,6 +508,124 @@ void priv_generate_candidate_credentials (NiceAgent *agent,
 }
 
 /*
+ * Create a local passive udp service
+ *
+ */
+typedef struct {
+  NicePassive *data;
+  GMainLoop *main_loop;
+} GSourceData;
+
+static gboolean
+nice_udp_passive_read_stream_cb (GObject *pollable_stream, gpointer user_data)
+{
+  GSourceData *gsource_data = user_data;
+  GError *error = NULL;
+  guint8 *buf = NULL;
+  gsize buf_len = 1500;
+  gssize len;
+
+  buf = g_malloc (buf_len);
+  memset (buf, 0, buf_len);
+
+  /* Try to receive some data. */
+  len = g_pollable_input_stream_read_nonblocking (
+      G_POLLABLE_INPUT_STREAM (pollable_stream), buf, buf_len, NULL, &error);
+
+  if (len == -1) {
+    g_assert_error (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK);
+    g_error_free (error);
+    g_free (buf);
+    return G_SOURCE_CONTINUE;
+  }
+
+  g_assert_no_error (error);
+
+  //g_main_loop_quit (gsource_data->main_loop);
+  //return G_SOURCE_REMOVE;
+  return G_SOURCE_CONTINUE;
+}
+
+static gpointer
+nice_udp_passive_mainloop_thread (gpointer data)
+{
+  GInputStream *input_stream;
+  GSourceData gsource_data;
+  GMainContext *main_context;
+  GMainLoop *main_loop;
+  GSource *stream_source;
+
+  main_context = g_main_context_ref_thread_default ();
+  main_loop = g_main_loop_new (main_context, FALSE);
+
+  gsource_data.data = data;
+  gsource_data.main_loop = main_loop;
+  input_stream = g_io_stream_get_input_stream (G_IO_STREAM (gsource_data.data->io_stream));
+
+  stream_source =
+      g_pollable_input_stream_create_source (
+          G_POLLABLE_INPUT_STREAM (input_stream), NULL);
+
+  g_source_set_callback (stream_source, (GSourceFunc) nice_udp_passive_read_stream_cb,
+      &gsource_data, NULL);
+  g_source_attach (stream_source, main_context);
+
+  /* Run the main loop. */
+  g_main_loop_run (main_loop);
+
+  g_source_destroy (stream_source);
+  g_source_unref (stream_source);
+  g_main_loop_unref (main_loop);
+  g_main_context_unref (main_context);
+
+  return NULL;
+}
+
+NicePassive *
+nice_udp_passive_new(NiceAgent *agent, NiceAddress *addr)
+{
+  guint stream_id;
+  GIOStream *io_stream;
+
+  NicePassive *passive = g_slice_new0 (NicePassive);
+  NiceSocket *sock = nice_udp_bsd_socket_new (addr);
+  passive->sock = sock;
+
+  stream_id = nice_agent_add_stream (agent, 1);
+  passive->stream_id = stream_id;
+
+  io_stream = nice_agent_get_io_stream (agent, stream_id, 1);
+  g_assert (G_IS_IO_STREAM (io_stream));
+  passive->io_stream = io_stream;
+
+  GThread *thread = g_thread_new ("udp passive thread", nice_udp_passive_mainloop_thread, passive);
+  passive->thread = thread;
+
+  return passive;
+}
+
+NiceSocket *
+nice_udp_passive_getsock(NicePassive *passive)
+{
+  return NULL;
+}
+
+NicePassive *
+nice_tcp_passive_new(GMainContext *ctx, NiceAddress *addr)
+{
+  NicePassive *passive = g_slice_new0 (NicePassive);
+  NiceSocket* sock = nice_tcp_passive_socket_new (ctx, addr);
+  passive->sock = sock;
+  return passive;
+}
+
+NiceSocket *
+nice_tcp_passive_getsock(NicePassive *passive)
+{
+  return NULL;
+}
+
+/*
  * Creates a local host candidate for 'component_id' of stream
  * 'stream_id'.
  *
@@ -557,11 +675,31 @@ HostCandidateResult discovery_add_local_host_candidate (
   /* note: candidate username and password are left NULL as stream
      level ufrag/password are used */
   if (transport == NICE_CANDIDATE_TRANSPORT_UDP) {
-    nicesock = nice_udp_bsd_socket_new (address);
+    /* TODO: check udp passive */
+    if (agent->global_passive) {
+      NicePassive* passive = agent->passive_udp;
+      if (!passive) {
+        passive = nice_udp_passive_new (agent, address);
+        agent->passive_udp = passive;
+      }
+      nicesock = nice_udp_passive_getsock (passive);
+    } else {
+      nicesock = nice_udp_bsd_socket_new (address);
+    }
   } else if (transport == NICE_CANDIDATE_TRANSPORT_TCP_ACTIVE) {
     nicesock = nice_tcp_active_socket_new (agent->main_context, address);
   } else if (transport == NICE_CANDIDATE_TRANSPORT_TCP_PASSIVE) {
-    nicesock = nice_tcp_passive_socket_new (agent->main_context, address);
+    /* TODO: check tcp passive */
+    if (agent->global_passive) {
+      NicePassive* passive = agent->passive_tcp;
+      if (!passive) {
+        passive = nice_tcp_passive_new (agent->main_context, address);
+        agent->passive_tcp = passive;
+      }
+      nicesock = nice_tcp_passive_getsock (passive);
+    } else {
+      nicesock = nice_tcp_passive_socket_new (agent->main_context, address);
+    }
   } else {
     /* TODO: Add TCP-SO */
   }
